@@ -1,0 +1,60 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: analytics-redis-1
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"] # no persistence for dev; remove for prod
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: analytics-postgres-1
+    environment:
+      POSTGRES_USER: analytics
+      POSTGRES_PASSWORD: analytics
+      POSTGRES_DB: analytics
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "analytics"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ingestion:
+    build: ./ingestion
+    container_name: analytics-ingestion-1
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "8000:8000"
+
+  processor:
+    build: ./processor
+    container_name: analytics-processor-1
+    depends_on:
+      - redis
+      - postgres
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://analytics:analytics@postgres:5432/analytics
+    restart: unless-stopped
+
+  reporting:
+    build: ./reporting
+    container_name: analytics-reporting-1
+    depends_on:
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://analytics:analytics@postgres:5432/analytics
+    ports:
+      - "8001:8001"
+
+volumes:
+  pgdata:
